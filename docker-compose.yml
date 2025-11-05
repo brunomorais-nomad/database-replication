@@ -1,0 +1,69 @@
+# A linha 'version' foi removida para corrigir o aviso
+services:
+  db-writer:
+    image: bitnami/postgresql:latest
+    ports:
+      - "5432:5432" # Expõe o writer na porta 5432 do host
+    volumes:
+      - db-writer-data:/bitnami/postgresql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql # Monta o script de init
+    environment:
+      # Configurações gerais
+      - POSTGRESQL_USERNAME=user
+      - POSTGRESQL_PASSWORD=password
+      - POSTGRESQL_DATABASE=test_db
+      # Configurações de Replicação (Modo Mestre)
+      - POSTGRESQL_REPLICATION_MODE=master
+      - POSTGRESQL_REPLICATION_USER=replicator
+      - POSTGRESQL_REPLICATION_PASSWORD=replicator_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d test_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - db-net
+
+  db-replica:
+    image: bitnami/postgresql:latest
+    ports:
+      - "5433:5432" # Expõe a réplica na porta 5433 do host
+    volumes:
+      - db-replica-data:/bitnami/postgresql
+      - ./replica-init.sh:/docker-entrypoint-initdb.d/replica-init.sh
+    environment:
+      # Configurações de Replicação (Modo Réplica)
+      - POSTGRESQL_REPLICATION_MODE=slave
+      # Aponta para o mestre (usando o nome do serviço)
+      - POSTGRESQL_MASTER_HOST=db-writer
+      - POSTGRESQL_MASTER_PORT_NUMBER=5432
+      # Credenciais do usuário de replicação (deve bater com o writer)
+      - POSTGRESQL_MASTER_USER=replicator
+      - POSTGRESQL_MASTER_PASSWORD=replicator_password
+
+      # === ⬇️ VARIÁVEIS ADICIONADAS PARA CORRIGIR O ERRO ⬇️ ===
+      
+      # 1. A réplica precisa de sua PRÓPRIA senha de admin (POSTGRESQL_PASSWORD)
+      - POSTGRESQL_PASSWORD=password
+      
+      # 2. A réplica também precisa das credenciais de replicação
+      - POSTGRESQL_REPLICATION_USER=replicator
+      - POSTGRESQL_REPLICATION_PASSWORD=replicator_password
+
+      # === ⬆️ FIM DAS VARIÁVEIS CORRIGIDAS ⬆️ ===
+
+      # ⭐ A MÁGICA DO DELAY DE 10 SEGUNDOS ⭐
+      # Adiciona configuração extra ao postgresql.conf da réplica
+      - POSTGRESQL_REPLICATION_RECOVERY_CONF=recovery_min_apply_delay = '10s'
+    depends_on:
+      db-writer:
+        condition: service_healthy # Garante que o writer esteja pronto
+    networks:
+      - db-net
+
+volumes:
+  db-writer-data:
+  db-replica-data:
+
+networks:
+  db-net:
